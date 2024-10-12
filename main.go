@@ -12,7 +12,7 @@ import (
 const baseURL = "https://breakit.se"
 
 // const articleLinkPattern = "/artiklar/"
-const crawlDepth = 1
+const maxCrawlDepth = 1
 
 /*
 Find the items:
@@ -49,7 +49,7 @@ func main() {
 	return
 }
 
-func ScrapeArticles(url string, currentCrawlDepth int, res *ScrapeResult) error {
+func ScrapeArticles(url string, curCrawlDepth int, res *ScrapeResult) error {
 	// Validate and adjust url.
 	if len(url) < 7 || (len(url) > 3 && url[:4] != "http") {
 		url = baseURL + url
@@ -58,7 +58,7 @@ func ScrapeArticles(url string, currentCrawlDepth int, res *ScrapeResult) error 
 	doc, err := FetchDoc(url)
 	if err != nil {
 		// Don't cancel current scraping because lower level scrapes fail. Simply log then continue.
-		if currentCrawlDepth == 0 {
+		if curCrawlDepth == 0 {
 			return err
 		} else {
 			log.Println(err)
@@ -73,10 +73,10 @@ func ScrapeArticles(url string, currentCrawlDepth int, res *ScrapeResult) error 
 	}
 
 	// If crawl recursion depth not reached continue scraping.
-	if currentCrawlDepth < crawlDepth {
+	if curCrawlDepth < maxCrawlDepth {
 		links := ParseArticleLinks(doc)
 		for i := 0; i < len(links); i++ {
-			err := ScrapeArticles(links[i], currentCrawlDepth+1, res)
+			err := ScrapeArticles(links[i], curCrawlDepth+1, res)
 			if err != nil {
 				log.Println(err)
 			}
