@@ -1,4 +1,4 @@
-package main
+package webscraper
 
 import (
 	"fmt"
@@ -9,31 +9,17 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
-/*
-Find the items:
-- Url
-- Publishing date
-- H1 title
-- H4 title
-- First paragraph
-*/
-type ArticleInfo struct {
-	url           string
-	datePublished string
-	titleH1       string
-	titleH4       string
-	paragraph     string
-}
-
 type Scraper struct {
-	articles []*ArticleInfo
-	wg       sync.WaitGroup
-	lock     sync.Mutex
+	Articles      []*ArticleInfo
+	MaxCrawlDepth int
+	BaseURL       string
+	wg            sync.WaitGroup
+	lock          sync.Mutex
 }
 
 func (sr *Scraper) append(a *ArticleInfo) {
 	sr.lock.Lock()
-	sr.articles = append(sr.articles, a)
+	sr.Articles = append(sr.Articles, a)
 	sr.lock.Unlock()
 }
 
@@ -41,7 +27,7 @@ func (sr *Scraper) ScrapeArticles(url string, curCrawlDepth int) error {
 
 	// Validate and adjust url.
 	if len(url) < 7 || (len(url) > 3 && url[:4] != "http") {
-		url = baseURL + url
+		url = sr.BaseURL + url
 	}
 
 	doc, err := FetchDoc(url)
@@ -62,7 +48,7 @@ func (sr *Scraper) ScrapeArticles(url string, curCrawlDepth int) error {
 	}
 
 	// If crawl recursion depth not reached continue scraping.
-	if curCrawlDepth < maxCrawlDepth {
+	if curCrawlDepth < sr.MaxCrawlDepth {
 		links := ParseArticleLinks(doc)
 		for i := 0; i < len(links); i++ {
 			sr.wg.Add(1)
@@ -98,30 +84,4 @@ func FetchDoc(url string) (*goquery.Document, error) {
 
 	// Load the HTML document
 	return goquery.NewDocumentFromReader(page.Body)
-}
-
-func ParseArticleLinks(doc *goquery.Document) []string {
-	var result = []string{}
-	// matchArticleLink := fmt.Sprintf(`a[href^="%s"]`, articleLinkPattern)
-	matchArticleLink := fmt.Sprintf(`a[href]`)
-
-	// Find article links
-	doc.Find(matchArticleLink).Each(func(_ int, s *goquery.Selection) {
-		link, exists := s.Attr("href")
-		if exists {
-			result = append(result, link)
-		}
-	})
-	return result
-}
-
-func ParseArticle(doc *goquery.Document) (*ArticleInfo, error) {
-	articleInfo := ArticleInfo{}
-
-	articleInfo.titleH1 = doc.Find("h1").First().Text()
-	articleInfo.titleH4 = doc.Find("h4").First().Text()
-	articleInfo.datePublished = doc.Find("time").First().Text()
-	articleInfo.paragraph = doc.Find("p").First().Text()
-
-	return &articleInfo, nil
 }
