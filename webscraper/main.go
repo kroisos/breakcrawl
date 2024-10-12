@@ -4,73 +4,99 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"sync"
 
 	"github.com/PuerkitoBio/goquery"
 )
 
 type Scraper struct {
-	Articles      []*ArticleInfo
-	MaxCrawlDepth int
-	BaseURL       string
-	wg            sync.WaitGroup
-	lock          sync.Mutex
+	Articles              []*ArticleInfo
+	MaxCrawlDepth         int
+	BaseURL               string
+	MatchingRoute         string
+	MaxConcurrentRequests int
+	curConcurrentRequests int
+	wg                    sync.WaitGroup
+	lock                  sync.Mutex
+	NumRequests           int
 }
 
-func (sr *Scraper) append(a *ArticleInfo) {
+func (sr *Scraper) addNew(a *ArticleInfo) {
 	sr.lock.Lock()
+	defer sr.lock.Unlock()
+
+	for i := 0; i < len(sr.Articles); i++ {
+		if sr.Articles[i].url == a.url {
+			return
+		}
+	}
 	sr.Articles = append(sr.Articles, a)
-	sr.lock.Unlock()
 }
 
-func (sr *Scraper) ScrapeArticles(url string, curCrawlDepth int) error {
+func (sr *Scraper) ScrapePage(url string, curCrawlDepth int) error {
+	doc, err := fetchDoc(url)
+	if err != nil {
+		return err
+	}
 
+	links := ParseArticleLinks(doc)
+	for i := 0; i < len(links); i++ {
+		sr.scrape(links[i], 1)
+	}
+
+	// Only first crawl waits for children.
+	sr.wg.Wait()
+
+	return nil
+}
+
+func (sr *Scraper) scrape(url string, curCrawlDepth int) {
 	// Validate and adjust url.
 	if len(url) < 7 || (len(url) > 3 && url[:4] != "http") {
 		url = sr.BaseURL + url
 	}
 
-	doc, err := FetchDoc(url)
+	sr.NumRequests++
+	doc, err := fetchDoc(url)
 	if err != nil {
-		// Don't cancel current scraping because lower level scrapes fail. Simply log then continue.
-		if curCrawlDepth == 0 {
-			return err
-		} else {
-			log.Println(err)
-		}
+		return
 	}
 
-	article, err := ParseArticle(doc)
-	if err != nil {
-		log.Println(err)
-	} else {
-		sr.append(article)
+	var article *ArticleInfo
+
+	// Validate url is article page. Else continue scraping.
+	if sr.validateUrl(url) {
+		article, err = ParseArticle(doc)
+		if err != nil {
+			log.Println(err)
+		} else {
+			article.url = url
+			sr.addNew(article)
+		}
 	}
 
 	// If crawl recursion depth not reached continue scraping.
-	if curCrawlDepth < sr.MaxCrawlDepth {
+	if curCrawlDepth <= sr.MaxCrawlDepth {
 		links := ParseArticleLinks(doc)
 		for i := 0; i < len(links); i++ {
-			sr.wg.Add(1)
-			go func() {
-				defer sr.wg.Done()
-				err := sr.ScrapeArticles(links[i], curCrawlDepth+1)
-				if err != nil {
-					log.Println(err)
-				}
-			}()
+			if sr.MaxConcurrentRequests > 1 && sr.curConcurrentRequests < sr.MaxConcurrentRequests {
+				sr.curConcurrentRequests++
+				sr.wg.Add(1)
+				go func() {
+					defer sr.wg.Done()
+					defer func() { sr.curConcurrentRequests-- }()
+					sr.scrape(links[i], curCrawlDepth+1)
+				}()
+				return
+			}
+			sr.scrape(links[i], curCrawlDepth+1)
 		}
 	}
-
-	// Condition to avoid every recursive crawl to wait for every other. Only first crawl waits for children.
-	if curCrawlDepth == 0 {
-		sr.wg.Wait()
-	}
-
-	return nil
+	return
 }
 
-func FetchDoc(url string) (*goquery.Document, error) {
+func fetchDoc(url string) (*goquery.Document, error) {
 	// Request the HTML page.
 	page, err := http.Get(url)
 	if err != nil {
@@ -84,4 +110,14 @@ func FetchDoc(url string) (*goquery.Document, error) {
 
 	// Load the HTML document
 	return goquery.NewDocumentFromReader(page.Body)
+}
+
+func (sr *Scraper) validateUrl(url string) bool {
+	matchString := fmt.Sprintf("%s%s", sr.BaseURL, sr.MatchingRoute)
+
+	match, err := regexp.MatchString(matchString, url)
+	if err != nil {
+		return false
+	}
+	return match
 }

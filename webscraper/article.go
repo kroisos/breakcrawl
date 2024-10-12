@@ -24,8 +24,7 @@ type ArticleInfo struct {
 
 func ParseArticleLinks(doc *goquery.Document) []string {
 	var result = []string{}
-	// matchArticleLink := fmt.Sprintf(`a[href^="%s"]`, articleLinkPattern)
-	matchArticleLink := fmt.Sprintf(`a[href]`)
+	matchArticleLink := fmt.Sprintf(`[href]`)
 
 	// Find article links
 	doc.Find(matchArticleLink).Each(func(_ int, s *goquery.Selection) {
@@ -38,6 +37,10 @@ func ParseArticleLinks(doc *goquery.Document) []string {
 }
 
 func ParseArticle(doc *goquery.Document) (*ArticleInfo, error) {
+	if doc == nil {
+		return nil, fmt.Errorf("Invalid goquery document!")
+	}
+
 	articleInfo := ArticleInfo{}
 
 	articleInfo.titleH1 = doc.Find("h1").First().Text()
